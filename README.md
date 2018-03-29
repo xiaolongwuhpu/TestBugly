@@ -1,4 +1,4 @@
-<p style="color: #AD5D0F;font-size: 13px; font-family: '宋体';">这块踩了好的坑,贴出来,做个记录,方便自己也方便他人</p>
+<p style="color: #AD5D0F;font-size: 13px; font-family: '宋体';">这块踩了好多坑,贴出来,做个记录,方便自己也方便他人,遇到问题可以提出来,我会尽量帮大家解答</p>
 
 # 一. 集成bugly和walle
 > 1. ####  *[bugly集成方法](https://bugly.qq.com/docs/user-guide/instruction-manual-android-hotfix/?v=20180119105842)*
