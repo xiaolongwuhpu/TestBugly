@@ -27,7 +27,7 @@ walle {
 
 ### 一: 打渠道包,因为需要走编译流程,也会随之生成相应的基础包
 
-1. 使用命令行 gradlew clean assembleReleaseChannels , 此时会在app/build/barapk 目录下生成基准包(整个文件一定要备份保存):如 **app-0328-16-55-35**文件夹;
+1. 使用命令行 gradlew clean assembleReleaseChannels 或者或者是assembleXxxxReleaseChannels, 此时会在app/build/barapk 目录下生成基准包(整个文件一定要备份保存):如 **app-0328-16-55-35**文件夹;
 2. 此时再查看 app/build/outputs/channels目录下生成所有渠道包. 如图1 ![](./picture/pic1.png)
 
 ### 二: 打补丁包.一个补丁适配所有渠道
