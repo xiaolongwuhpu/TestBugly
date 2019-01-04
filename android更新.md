@@ -132,9 +132,9 @@ IncrementalChange localIncrementalChange = $change;//1
 		}
 ```   
 
-   其中注释1处是一个成员变量localIncrementalChange ，它的值为$change，$change实现了IncrementalChange这个抽象接口。当我们点击InstantRun时，如果方法没有变化则$change为null，就调用return，不做任何处理。如果方法有变化，就生成替换类，这里我们假设MainActivity的onCreate方法做了修改，就会生成替换类MainActivity$override，这个类实现了IncrementalChange接口，同时也会生成一个AppPatchesLoaderImpl类，这个类的getPatchedClasses方法会返回被修改的类的列表（里面包含了MainActivity），根据列表会将MainActivity的$change设置为MainActivity$override，因此满足了注释2的条件，会执行MainActivity$override的access$dispatch方法，accessdispatch方法中会根据参数&quot;onCreate.(Landroid/os/Bundle;)V&quot;执行‘MainActivity dispatch方法中会根据参数&quot;onCreate.(Landroid/os/Bundle;)V&quot;执行`MainActivitydispatch方法中会根据参数"onCreate.(Landroid/os/Bundle;)V"执行‘MainActivityoverride`的onCreate方法，从而实现了onCreate方法的修改。   
-   
+   其中注释1处是一个成员变量localIncrementalChange ，它的值为$change，$change实现了IncrementalChange这个抽象接口。当我们点击InstantRun时，如果方法没有变化则$change为null，就调用return，不做任何处理。如果方法有变化，就生成替换类，这里我们假设MainActivity的onCreate方法做了修改，就会生成替换类MainActivity$override，这个类实现了IncrementalChange接口，同时也会生成一个AppPatchesLoaderImpl类，这个类的getPatchedClasses方法会返回被修改的类的列表（里面包含了MainActivity），根据列表会将MainActivity的$change设置为MainActivity$override，因此满足了注释2的条件，会执行MainActivity$override的access$dispatch方法，accessdispatch方法中会根据参数&quot;onCreate.(Landroid/os/Bundle;)V&quot;执行‘MainActivity dispatch方法中会根据参数&quot;onCreate.(Landroid/os/Bundle;)V&quot;执行`MainActivitydispatch方法中会根据参数"onCreate.(Landroid/os/Bundle;)V"执行‘MainActivityoverride`的onCreate方法，从而实现了onCreate方法的修改。      
 借鉴Instant Run的原理的热修复框架有Robust和Aceso。
+
 --------------------- 
 
 
