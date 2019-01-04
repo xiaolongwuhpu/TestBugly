@@ -17,6 +17,8 @@
 #### 技术原理及特点
 代码修复主要有三个方案，分别是底层替换方案、类加载方案和Instant Run方案
 - ##### 类加载方案
+
+![Classload](https://upload-images.jianshu.io/upload_images/1437930-bb9d359f4c7e9935.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1000/format/webp)
   类加载方案基于Dex分包方案，什么是Dex分包方案呢？这个得先从65536限制和LinearAlloc限制说起。
 **65536限制**
 随着应用功能越来越复杂，代码量不断地增大，引入的库也越来越多，可能会在编译时提示如下异常：
