@@ -15,7 +15,6 @@
 热修复:热修复（也称热补丁、热修复补丁，英语：hotfix）是一种包含信息的独立的累积更新包，通常表现为一个或多个文件。这被用来解决软件产品的问题（例如一个程序错误）。 —— 维基百科
 
 #### 技术原理及特点
-代码修复主要有三个方案，分别是底层替换方案、类加载方案和Instant Run方案
 - ##### 类加载方案
 
 ![Classload](https://upload-images.jianshu.io/upload_images/1437930-bb9d359f4c7e9935.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1000/format/webp)
