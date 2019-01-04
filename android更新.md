@@ -203,7 +203,7 @@ if (!ResDiffPatchInternal.tryRecoverResourceFiles(manager, signatureCheck, conte
 
 
 这里分别对应的是dex的patch，so文件的patch，资源文件的patch。
-首先来看DexDiffPatchInternal.tryRecoverDexFiles，追踪代码可以看得出，经过一系列的操作校验之后，patchDexFile是执行patch操作的关键方法，而所有的处理交给了new DexPatchApplier(oldDexStream, patchFileStream).executeAndSaveTo(patchedDexFile)，继续追踪下去，可以看到在生成补丁文件时候的熟悉代码，那就是那一系列dex的比对操作：
+首先来看DexDiffPatchInternal.tryRecoverDexFiles，追踪代码可以看得出，经过一系列的操作校验之后，patchDexFile是执行patch操作的关键方法，而所有的处理交给了new DexPatchApplier(oldDexStream, patchFileStream).executeAndSaveTo(patchedDexFile)，一系列dex的比对操作：
 
 ```
 // Secondly, run patch algorithms according to sections' dependencies.
