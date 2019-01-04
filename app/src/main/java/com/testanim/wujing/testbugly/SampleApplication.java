@@ -15,11 +15,11 @@ import com.tencent.tinker.loader.shareutil.ShareConstants;
  * 参数4：boolean tinkerLoadVerifyFlag  加载dex或者lib是否验证md5，默认为false
  * </pre>
  * @author wenjiewu
- * @since 2016/11/15
+ * @since 2016/11/15¬
  */
 public class SampleApplication extends TinkerApplication {
     public SampleApplication() {
         super(ShareConstants.TINKER_ENABLE_ALL, "com.testanim.wujing.testbugly.SampleApplicationLike",
-                "com.tencent.tinker.loader.TinkerLoader", true);
+                "com.tencent.tinker.loader.TinkerLoader", false);
     }
 }
