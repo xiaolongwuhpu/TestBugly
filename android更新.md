@@ -165,6 +165,402 @@ IncrementalChange localIncrementalChange = $change;//1
 
 https://github.com/xiaolongwuhpu/TestBugly
 
+#####  tinkerPatch的过程
+前面在接入部分我使用了tinker的加载补丁的方法：
+TinkerInstaller.onReceiveUpgradePatch(getApplicationContext(), patchFile.getAbsolutePath());
+
+就开始从onReceiveUpgradePatch进行代码的追踪。
+点进去这个方法：
+```
+/**
+ * new patch file to install, try install them with :patch process
+ *
+ * @param context
+ * @param patchLocation
+ */
+public static void onReceiveUpgradePatch(Context context, String patchLocation) {
+    Tinker.with(context).getPatchListener().onPatchReceived(patchLocation);
+}
+
+```
+
+可以看到这里获取了tinker对象的实例，通过app自身的application的上下文对象获取到，而后通过patch的listener的方法进行加载，这里listener只是一个接口，分析这里需要回到第一部分installTinker的时候添加的：
+```
+//or you can just use DefaultLoadReporter
+LoadReporter loadReporter = new SampleLoadReporter(appLike.getApplication());
+//or you can just use DefaultPatchReporter
+PatchReporter patchReporter = new SamplePatchReporter(appLike.getApplication());
+//or you can just use DefaultPatchListener
+PatchListener patchListener = new SamplePatchListener(appLike.getApplication());
+```
+
+这里主要看SamplePatchListener，追踪到DefaultPatchListener的onPatchReceived方法，这里就是开始进行patch操作的地方。
+首先通过patchCheck方法进行了一系列的校验工作，然后通过TinkerPatchService.runPatchService(context, path);运行了起了一个patchService，继续查看TinkerPatchService，可以看到以下两个核心的启动方法：
+```
+private static void runPatchServiceByIntentService(Context context, String path) {
+    TinkerLog.i(TAG, "run patch service by intent service.");
+    Intent intent = new Intent(context, IntentServiceRunner.class);
+    intent.putExtra(PATCH_PATH_EXTRA, path);
+    intent.putExtra(RESULT_CLASS_EXTRA, resultServiceClass.getName());
+    context.startService(intent);
+}
+
+@TargetApi(21)
+private static boolean runPatchServiceByJobScheduler(Context context, String path) {
+    TinkerLog.i(TAG, "run patch service by job scheduler.");
+    final JobInfo.Builder jobInfoBuilder = new JobInfo.Builder(
+            1, new ComponentName(context, JobServiceRunner.class)
+    );
+    final PersistableBundle extras = new PersistableBundle();
+    extras.putString(PATCH_PATH_EXTRA, path);
+    extras.putString(RESULT_CLASS_EXTRA, resultServiceClass.getName());
+    jobInfoBuilder.setExtras(extras);
+    jobInfoBuilder.setOverrideDeadline(5);
+    final JobScheduler jobScheduler = (JobScheduler) context.getSystemService(Context.JOB_SCHEDULER_SERVICE);
+    if (jobScheduler == null) {
+        TinkerLog.e(TAG, "jobScheduler is null.");
+        return false;
+    }
+    return (jobScheduler.schedule(jobInfoBuilder.build()) == JobScheduler.RESULT_SUCCESS);
+}
+
+```
+分别是android 21版本以上和以下两个方法，这是因为在android 5.0之后，为了对系统的耗电量和内存管理进行优化，Google官方要求对后台消耗资源的操作推荐放到JobScheduler中去执行。
+IntentServiceRunner是改Services的核心，这是一个异步的service，查看他的onHandleIntent，可以看到，所有的操作都在doApplyPatch(getApplicationContext(), intent);当中：
+```
+@Override
+protected void onHandleIntent(@Nullable Intent intent) {
+    increasingPriority();
+    doApplyPatch(getApplicationContext(), intent);
+}
+
+```
+
+方法中核心是：
+
+```
+result = upgradePatchProcessor.tryPatch(context, path, patchResult);
+```
+
+
+而这个upgradePatchProcessor也是在初始化的时候就传入的。
+
+```
+//you can set your own upgrade patch if you need
+AbstractPatch upgradePatchProcessor = new UpgradePatch();
+```
+
+
+我们查看UpgradePatch的tryPatch进行查看，方法很长，主要核心的部分是：
+
+```
+//we use destPatchFile instead of patchFile, because patchFile may be deleted during the patch process
+if (!DexDiffPatchInternal.tryRecoverDexFiles(manager, signatureCheck, context, patchVersionDirectory, destPatchFile)) {
+    TinkerLog.e(TAG, "UpgradePatch tryPatch:new patch recover, try patch dex failed");
+    return false;
+}
+
+if (!BsDiffPatchInternal.tryRecoverLibraryFiles(manager, signatureCheck, context, patchVersionDirectory, destPatchFile)) {
+    TinkerLog.e(TAG, "UpgradePatch tryPatch:new patch recover, try patch library failed");
+    return false;
+}
+
+if (!ResDiffPatchInternal.tryRecoverResourceFiles(manager, signatureCheck, context, patchVersionDirectory, destPatchFile)) {
+    TinkerLog.e(TAG, "UpgradePatch tryPatch:new patch recover, try patch resource failed");
+    return false;
+}
+```
+
+
+这里分别对应的是dex的patch，so文件的patch，资源文件的patch。
+首先来看DexDiffPatchInternal.tryRecoverDexFiles，追踪代码可以看得出，经过一系列的操作校验之后，patchDexFile是执行patch操作的关键方法，而所有的处理交给了new DexPatchApplier(oldDexStream, patchFileStream).executeAndSaveTo(patchedDexFile)，继续追踪下去，可以看到在生成补丁文件时候的熟悉代码，那就是那一系列dex的比对操作：
+
+```
+// Secondly, run patch algorithms according to sections' dependencies.
+this.stringDataSectionPatchAlg = new StringDataSectionPatchAlgorithm(
+        patchFile, oldDex, patchedDex, oldToPatchedIndexMap
+);
+this.typeIdSectionPatchAlg = new TypeIdSectionPatchAlgorithm(
+        patchFile, oldDex, patchedDex, oldToPatchedIndexMap
+);
+this.protoIdSectionPatchAlg = new ProtoIdSectionPatchAlgorithm(
+        patchFile, oldDex, patchedDex, oldToPatchedIndexMap
+);
+this.fieldIdSectionPatchAlg = new FieldIdSectionPatchAlgorithm(
+        patchFile, oldDex, patchedDex, oldToPatchedIndexMap
+);
+this.methodIdSectionPatchAlg = new MethodIdSectionPatchAlgorithm(
+        patchFile, oldDex, patchedDex, oldToPatchedIndexMap
+);
+this.classDefSectionPatchAlg = new ClassDefSectionPatchAlgorithm(
+        patchFile, oldDex, patchedDex, oldToPatchedIndexMap
+);
+this.typeListSectionPatchAlg = new TypeListSectionPatchAlgorithm(
+        patchFile, oldDex, patchedDex, oldToPatchedIndexMap
+);
+this.annotationSetRefListSectionPatchAlg = new AnnotationSetRefListSectionPatchAlgorithm(
+        patchFile, oldDex, patchedDex, oldToPatchedIndexMap
+);
+this.annotationSetSectionPatchAlg = new AnnotationSetSectionPatchAlgorithm(
+        patchFile, oldDex, patchedDex, oldToPatchedIndexMap
+);
+this.classDataSectionPatchAlg = new ClassDataSectionPatchAlgorithm(
+        patchFile, oldDex, patchedDex, oldToPatchedIndexMap
+);
+this.codeSectionPatchAlg = new CodeSectionPatchAlgorithm(
+        patchFile, oldDex, patchedDex, oldToPatchedIndexMap
+);
+this.debugInfoSectionPatchAlg = new DebugInfoItemSectionPatchAlgorithm(
+        patchFile, oldDex, patchedDex, oldToPatchedIndexMap
+);
+this.annotationSectionPatchAlg = new AnnotationSectionPatchAlgorithm(
+        patchFile, oldDex, patchedDex, oldToPatchedIndexMap
+);
+this.encodedArraySectionPatchAlg = new StaticValueSectionPatchAlgorithm(
+        patchFile, oldDex, patchedDex, oldToPatchedIndexMap
+);
+this.annotationsDirectorySectionPatchAlg = new AnnotationsDirectorySectionPatchAlgorithm(
+        patchFile, oldDex, patchedDex, oldToPatchedIndexMap
+);
+
+this.stringDataSectionPatchAlg.execute();
+this.typeIdSectionPatchAlg.execute();
+this.typeListSectionPatchAlg.execute();
+this.protoIdSectionPatchAlg.execute();
+this.fieldIdSectionPatchAlg.execute();
+this.methodIdSectionPatchAlg.execute();
+this.annotationSectionPatchAlg.execute();
+this.annotationSetSectionPatchAlg.execute();
+this.annotationSetRefListSectionPatchAlg.execute();
+this.annotationsDirectorySectionPatchAlg.execute();
+this.debugInfoSectionPatchAlg.execute();
+this.codeSectionPatchAlg.execute();
+this.classDataSectionPatchAlg.execute();
+this.encodedArraySectionPatchAlg.execute();
+this.classDefSectionPatchAlg.execute();
+```
+
+截取其中一些片段，上面在生成的部分我提到过一篇分析tinker核心算法的文章，里面也描述了dex的结构，如下图：
+
+
+![patch](https://upload-images.jianshu.io/upload_images/1801847-1c077c1bd97f6557.jpg?imageMogr2/auto-orient/strip%7CimageView2/2/w/243/format/webp)
+
+这些比对的操作其实就是在对dex中的每个table进行的。
+执行完毕之后，依旧是通过二路归并的算法，生成经过了patch操作之后的dex文件，保存到本地目录，等待loader的时候使用。
+loader的后面说，继续看其他两个patch操作。
+res的patch操作是ResDiffPatchInternal.tryRecoverResourceFiles，追踪一下代码，可以看到，首先第一步就是先读取了之前生成的meta文件：
+
+```
+String resourceMeta = checker.getMetaContentMap().get(RES_META_FILE);
+```
+
+
+最后由extractResourceDiffInternals方法来进行补丁的合成，其实原理就是通过读取meta里面记录的每个资源对应的操作，来执行相关的增加、删除、修改的操作，最后将资源文件打包为apk文件，android自带的loader加载器其实也是支持.apk文件动态加载的。
+so文件的操作就更简单了，就是通过bsPatch进行一次patch操作，然后剩下的重载之类的方法前面也讲到了，和applicationLike的原理差不多，就是通过增加一层代理操作的方式，来达到托管的效果。
+patch完毕之后，tinker会在本地生成好可读取的补丁文件，便于再次启动的时候，进行加载。
+#####  tinker loader的过程
+
+application 初始化的时候，就已经传入了com.tencent.tinker.loader.TinkerLoader，而tinkerloader也是通过TinkerApplication中反射进行加载的：
+
+```
+private void loadTinker() {
+    try {
+        //reflect tinker loader, because loaderClass may be define by user!
+        Class<?> tinkerLoadClass = Class.forName(loaderClassName, false, getClassLoader());
+        Method loadMethod = tinkerLoadClass.getMethod(TINKER_LOADER_METHOD, TinkerApplication.class);
+        Constructor<?> constructor = tinkerLoadClass.getConstructor();
+        tinkerResultIntent = (Intent) loadMethod.invoke(constructor.newInstance(), this);
+    } catch (Throwable e) {
+        //has exception, put exception error code
+        tinkerResultIntent = new Intent();
+        ShareIntentUtil.setIntentReturnCode(tinkerResultIntent, ShareConstants.ERROR_LOAD_PATCH_UNKNOWN_EXCEPTION);
+        tinkerResultIntent.putExtra(INTENT_PATCH_EXCEPTION, e);
+    }
+}
+```
+
+
+tinkerLoader的核心方法就是tryLoad，而该方法下又使用了tryLoadPatchFilesInternal，一个非常非常长的方法。
+其实逐一分析过后，无非就是三个loader：
+
+
+```
+TinkerDexLoader
+TinkerSoLoader
+TinkerResourceLoader
+```
+
+
+其余的一些方法中的操作大部分都是校验参数合法性，文件完整性的一些操作，可以略过。
+so的加载方式和原理前面已经说了，不在细说了，着重说一下dex和res的加载。
+TinkerDexLoader.loadTinkerJars是加载dex的核心方法，点进去又能看到一大部分校验的判断的，核心的加载内容是SystemClassLoaderAdder.installDexes(application, classLoader, optimizeDir, legalFiles);这段代码，查看installDexes可以看到tinker区分版本进行安装的操作：
+
+```
+@SuppressLint("NewApi")
+public static void installDexes(Application application, PathClassLoader loader, File dexOptDir, List<File> files)
+    throws Throwable {
+    Log.i(TAG, "installDexes dexOptDir: " + dexOptDir.getAbsolutePath() + ", dex size:" + files.size());
+
+    if (!files.isEmpty()) {
+        files = createSortedAdditionalPathEntries(files);
+        ClassLoader classLoader = loader;
+        if (Build.VERSION.SDK_INT >= 24 && !checkIsProtectedApp(files)) {
+            classLoader = AndroidNClassLoader.inject(loader, application);
+        }
+        //because in dalvik, if inner class is not the same classloader with it wrapper class.
+        //it won't fail at dex2opt
+        if (Build.VERSION.SDK_INT >= 23) {
+            V23.install(classLoader, files, dexOptDir);
+        } else if (Build.VERSION.SDK_INT >= 19) {
+            V19.install(classLoader, files, dexOptDir);
+        } else if (Build.VERSION.SDK_INT >= 14) {
+            V14.install(classLoader, files, dexOptDir);
+        } else {
+            V4.install(classLoader, files, dexOptDir);
+        }
+        //install done
+        sPatchDexCount = files.size();
+        Log.i(TAG, "after loaded classloader: " + classLoader + ", dex size:" + sPatchDexCount);
+
+        if (!checkDexInstall(classLoader)) {
+            //reset patch dex
+            SystemClassLoaderAdder.uninstallPatchDex(classLoader);
+            throw new TinkerRuntimeException(ShareConstants.CHECK_DEX_INSTALL_FAIL);
+        }
+    }
+}
+```
+
+
+这里之所以要区分版本，tinker官方也描述了一些android版本上的坑，前面分享过的连接中有详细的描述，这里随便点开一个看一下，我打开的v23的：
+
+```
+private static void install(ClassLoader loader, List<File> additionalClassPathEntries,
+                                    File optimizedDirectory)
+    throws IllegalArgumentException, IllegalAccessException,
+    NoSuchFieldException, InvocationTargetException, NoSuchMethodException, IOException {
+    /* The patched class loader is expected to be a descendant of
+     * dalvik.system.BaseDexClassLoader. We modify its
+     * dalvik.system.DexPathList pathList field to append additional DEX
+     * file entries.
+     */
+    Field pathListField = ShareReflectUtil.findField(loader, "pathList");
+    Object dexPathList = pathListField.get(loader);
+    ArrayList<IOException> suppressedExceptions = new ArrayList<IOException>();
+    ShareReflectUtil.expandFieldArray(dexPathList, "dexElements", makePathElements(dexPathList,
+        new ArrayList<File>(additionalClassPathEntries), optimizedDirectory,
+        suppressedExceptions));
+    if (suppressedExceptions.size() > 0) {
+        for (IOException e : suppressedExceptions) {
+            Log.w(TAG, "Exception in makePathElement", e);
+            throw e;
+        }
+
+    }
+}
+```
+
+通过这个方法可以看出，tinker也是通过反射，获取到系统ClassLoader的dexElements数组，并把需要修改的dex文件插入到了数组当中的最前端。
+这里就是tinker整个代码热更新的原理，就是把合并过后的dex文件，插入到Elements数组的前端，因为android的类加载器在加载dex的时候，会按照数组的顺序查找，如果在下标靠前的位置查找到了，就不继续向下寻找了，所以也就起到了热更新的作用。
+继续看Res的加载。
+TinkerResourceLoader.loadTinkerResources。
+方法中的核心部分是：TinkerResourcePatcher.monkeyPatchExistingResources(application, resourceString);
+
+```
+/**
+ * @param context
+ * @param externalResourceFile
+ * @throws Throwable
+ */
+public static void monkeyPatchExistingResources(Context context, String externalResourceFile) throws Throwable {
+    if (externalResourceFile == null) {
+        return;
+    }
+
+    final ApplicationInfo appInfo = context.getApplicationInfo();
+
+    final Field[] packagesFields;
+    if (Build.VERSION.SDK_INT < 27) {
+        packagesFields = new Field[]{packagesFiled, resourcePackagesFiled};
+    } else {
+        packagesFields = new Field[]{packagesFiled};
+    }
+    for (Field field : packagesFields) {
+        final Object value = field.get(currentActivityThread);
+
+        for (Map.Entry<String, WeakReference<?>> entry
+                : ((Map<String, WeakReference<?>>) value).entrySet()) {
+            final Object loadedApk = entry.getValue().get();
+            if (loadedApk == null) {
+                continue;
+            }
+            final String resDirPath = (String) resDir.get(loadedApk);
+            if (appInfo.sourceDir.equals(resDirPath)) {
+                resDir.set(loadedApk, externalResourceFile);
+            }
+        }
+    }
+
+    // Create a new AssetManager instance and point it to the resources installed under
+    if (((Integer) addAssetPathMethod.invoke(newAssetManager, externalResourceFile)) == 0) {
+        throw new IllegalStateException("Could not create new AssetManager");
+    }
+
+    // Kitkat needs this method call, Lollipop doesn't. However, it doesn't seem to cause any harm
+    // in L, so we do it unconditionally.
+    if (stringBlocksField != null && ensureStringBlocksMethod != null) {
+        stringBlocksField.set(newAssetManager, null);
+        ensureStringBlocksMethod.invoke(newAssetManager);
+    }
+
+    for (WeakReference<Resources> wr : references) {
+        final Resources resources = wr.get();
+        if (resources == null) {
+            continue;
+        }
+        // Set the AssetManager of the Resources instance to our brand new one
+        try {
+            //pre-N
+            assetsFiled.set(resources, newAssetManager);
+        } catch (Throwable ignore) {
+            // N
+            final Object resourceImpl = resourcesImplFiled.get(resources);
+            // for Huawei HwResourcesImpl
+            final Field implAssets = findField(resourceImpl, "mAssets");
+            implAssets.set(resourceImpl, newAssetManager);
+        }
+
+        clearPreloadTypedArrayIssue(resources);
+
+        resources.updateConfiguration(resources.getConfiguration(), resources.getDisplayMetrics());
+    }
+
+    // Handle issues caused by WebView on Android N.
+    // Issue: On Android N, if an activity contains a webview, when screen rotates
+    // our resource patch may lost effects.
+    // for 5.x/6.x, we found Couldn't expand RemoteView for StatusBarNotification Exception
+    if (Build.VERSION.SDK_INT >= 24) {
+        try {
+            if (publicSourceDirField != null) {
+                publicSourceDirField.set(context.getApplicationInfo(), externalResourceFile);
+            }
+        } catch (Throwable ignore) {
+        }
+    }
+
+    if (!checkResUpdate(context)) {
+        throw new TinkerRuntimeException(ShareConstants.CHECK_RES_INSTALL_FAIL);
+    }
+}
+```
+
+
+这里分析不难看出，其实就是通过反射的方法，替换掉系统的AssetManager，也就是mAssets这个变量，而新的NewAssetManager指向的resource是新的资源路径，这样在系统调用mAssets进行加载资源的时候，使用的就是热更新后的资源了。
+
+
+
+
+
 #### 增量更新
 
 - ##### 准备
